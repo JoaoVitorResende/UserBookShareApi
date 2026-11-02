@@ -12,6 +12,7 @@ import (
 type UserRepository interface {
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	Save(ctx context.Context, user domain.User) error
+	FindByEmail(ctx context.Context, email string) (domain.User, error)
 }
 
 type PasswordHasher interface {

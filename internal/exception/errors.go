@@ -9,4 +9,6 @@ var (
 	ErrEmailEmpty         = errors.New("email empty")
 	ErrPasswordTooLong    = errors.New("password to large")
 	ErrEmailAlreadyExists = errors.New("email already exist")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserNotFound       = errors.New("user not found")
 )
