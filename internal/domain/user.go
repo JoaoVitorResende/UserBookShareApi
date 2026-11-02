@@ -1,58 +1,60 @@
 package domain
 
 import (
-    "UserBookApi/internal/exception"
-    "strings"
+	"strings"
 
-    "github.com/google/uuid"
-    "golang.org/x/crypto/bcrypt"
+	"UserBookApi/internal/exception"
+
+	"github.com/google/uuid"
 )
 
 type User struct {
-    userId       uuid.UUID
-    name         string
-    passwordHash string
-    email        string
-    bookQuantity int
+	id           uuid.UUID
+	name         string
+	email        string
+	passwordHash string
 }
 
-func NewUser(name, password, email string) (User, error) {
-    name = strings.TrimSpace(name)
-    email = strings.TrimSpace(email)
-
-    if err := validate(name, password, email); err != nil {
-        return User{}, err
-    }
-
-    hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-    if err != nil {
-        return User{}, err
-    }
-
-    return User{
-        userId:       uuid.New(),
-        name:         name,
-        email:        email,
-        passwordHash: string(hash),
-    }, nil
+func ValidatePlainPassword(plain string) error {
+	switch {
+	case strings.TrimSpace(plain) == "":
+		return exception.ErrEmptyPassword
+	case len(plain) < 6:
+		return exception.ErrPasswordToSmall
+	case len(plain) > 72:
+		return exception.ErrPasswordTooLong
+	}
+	return nil
 }
 
-func (u User) CheckPassword(plain string) bool {
-    return bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte(plain)) == nil
-}
+func validateUserItens(name, email, passwordHash string) error{
 
-func validate(name, password, email string) error {
-    switch {
-    case name == "":
-        return exception.ErrEmptyName
-    case email == "":
-        return exception.ErrEmailEmpty
-    case strings.TrimSpace(password) == "":
-        return exception.ErrEmptyPassword
-    case len(password) < 6:
-        return exception.ErrPasswordToSmall
-    case len(password) > 72: 
-        return exception.ErrPasswordTooLong 
-    }
+    if name == "" {
+		return exception.ErrEmptyName
+	}
+	if email == "" {
+		return exception.ErrEmailEmpty
+	}
+	if passwordHash == "" {
+		return exception.ErrEmptyPassword
+	}
+
     return nil
 }
+
+func NewUser(name, email, passwordHash string) (User, error) {
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+    err := validateUserItens(name, email, passwordHash)
+    
+    if err != nil{
+        return User{}, err
+    }
+
+	return User{id: uuid.New(), name: name, email: email, passwordHash: passwordHash}, nil
+}
+
+func (u User) ID() uuid.UUID        { return u.id }
+func (u User) Name() string         { return u.name }
+func (u User) Email() string        { return u.email }
+func (u User) PasswordHash() string { return u.passwordHash }
