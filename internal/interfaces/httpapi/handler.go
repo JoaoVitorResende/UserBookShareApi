@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"UserBookApi/internal/application"
@@ -81,6 +82,7 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, exception.ErrInvalidCredentials):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 	default:
+		log.Printf("internal error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }
