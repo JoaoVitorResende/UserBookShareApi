@@ -1,34 +1,76 @@
 ﻿package main
 
 import (
-    "crypto/rand"
-    "crypto/rsa"
-    "crypto/x509"
-    "encoding/pem"
-    "log"
-    "os"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"UserBookApi/internal/application"
+	"UserBookApi/internal/infrastructure/postgres"
+	"UserBookApi/internal/infrastructure/security"
+	"UserBookApi/internal/interfaces/messaging"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
-    key, err := rsa.GenerateKey(rand.Reader, 2048)
-    if err != nil {
-        log.Fatal(err)
-    }
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-    privPEM := pem.EncodeToMemory(&pem.Block{
-        Type:  "RSA PRIVATE KEY",
-        Bytes: x509.MarshalPKCS1PrivateKey(key),
-    })
-    if err := os.WriteFile("private.pem", privPEM, 0o600); err != nil {
-        log.Fatal(err)
-    }
+	dsn := mustEnv("DATABASE_URL")
+	amqpURL := mustEnv("RABBITMQ_URL")
+	keyPath := mustEnv("JWT_PRIVATE_KEY_PATH")
 
-    pubBytes, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-    if err != nil {
-        log.Fatal(err)
-    }
-    pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-    if err := os.WriteFile("public.pem", pubPEM, 0o644); err != nil {
-        log.Fatal(err)
-    }
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	conn, err := amqp.Dial(amqpURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ch.Close()
+
+	issuer, err := security.NewJWTIssuer(keyPEM, time.Hour)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	repo := postgres.NewUserRepository(db)
+	hasher := security.BcryptHasher{}
+
+	register := application.NewRegisterUserUseCase(repo, hasher)
+	login := application.NewLoginUseCase(repo, hasher, issuer)
+
+	consumer := messaging.NewConsumer(ch, register, login)
+	if err := consumer.Run(ctx); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("shutting down")
+}
+
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("%s is required", key)
+	}
+	return v
 }

@@ -1,61 +1,99 @@
-package main
+package messaging
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log"
-	"net/http"
-	"os"
-	"time"
 
-	"UserBookApi/internal/application"
-	"UserBookApi/internal/infrastructure/postgres"
-	"UserBookApi/internal/infrastructure/security"
-	"UserBookApi/internal/interfaces/httpapi"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func main() {
-	ctx := context.Background()
+const (
+	QueueRegister = "user.register"
+	QueueLogin    = "user.login"
+)
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Fatal("DATABASE_URL is required")
+type Handler interface {
+	Handle(ctx context.Context, body []byte) Response
+}
+
+type Consumer struct {
+	ch     *amqp.Channel
+	routes map[string]Handler
+}
+
+func NewConsumer(ch *amqp.Channel) *Consumer {
+	return &Consumer{ch: ch, routes: make(map[string]Handler)}
+}
+
+func (c *Consumer) Register(queue string, h Handler) {
+	c.routes[queue] = h
+}
+
+func (c *Consumer) Run(ctx context.Context) error {
+	if err := c.ch.Qos(10, 0, false); err != nil {
+		return err
 	}
 
-	keyPath := os.Getenv("JWT_PRIVATE_KEY_PATH")
-	if keyPath == "" {
-		log.Fatal("JWT_PRIVATE_KEY_PATH is required")
+	errCh := make(chan error, len(c.routes))
+
+	for queue, h := range c.routes {
+		if _, err := c.ch.QueueDeclare(queue, true, false, false, false, nil); err != nil {
+			return err
+		}
+		msgs, err := c.ch.Consume(queue, "", false, false, false, false, nil)
+		if err != nil {
+			return err
+		}
+
+		log.Println("consuming:", queue)
+		go func(msgs <-chan amqp.Delivery, h Handler) {
+			errCh <- c.serve(ctx, msgs, h)
+		}(msgs, h)
 	}
 
-	keyPEM, err := os.ReadFile(keyPath)
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
+		return err
+	}
+}
+
+func (c *Consumer) serve(ctx context.Context, msgs <-chan amqp.Delivery, h Handler) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case d, ok := <-msgs:
+			if !ok {
+				return errors.New("delivery channel closed")
+			}
+			resp := h.Handle(ctx, d.Body)
+			c.reply(ctx, d, resp)
+			_ = d.Ack(false)
+		}
+	}
+}
+
+func (c *Consumer) reply(ctx context.Context, d amqp.Delivery, resp Response) {
+	if d.ReplyTo == "" {
+		return
+	}
+
+	body, err := json.Marshal(resp)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("marshal reply: %v", err)
+		return
 	}
 
-	db, err := pgxpool.New(ctx, dsn)
+	err = c.ch.PublishWithContext(ctx, "", d.ReplyTo, false, false, amqp.Publishing{
+		ContentType:   "application/json",
+		CorrelationId: d.CorrelationId,
+		Body:          body,
+	})
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("publish reply: %v", err)
 	}
-	defer db.Close()
-
-	issuer, err := security.NewJWTIssuer(keyPEM, time.Hour)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	repo := postgres.NewUserRepository(db)
-	hasher := security.BcryptHasher{}
-
-	register := application.NewRegisterUserUseCase(repo, hasher)
-	login := application.NewLoginUseCase(repo, hasher, issuer)
-	handler := httpapi.NewHandler(register, login)
-
-	r := chi.NewRouter()
-	r.Post("/users", handler.Register)
-	r.Post("/login", handler.Login)
-
-	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
 }
