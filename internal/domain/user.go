@@ -44,7 +44,7 @@ func validateUserItens(name, email, passwordHash string) error{
 
 func NewUser(name, email, passwordHash string) (User, error) {
 	name = strings.TrimSpace(name)
-	email = strings.TrimSpace(email)
+	email = NormalizeEmail(email)
     err := validateUserItens(name, email, passwordHash)
 
     if err != nil{

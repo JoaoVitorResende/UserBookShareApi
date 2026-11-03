@@ -1,99 +1,96 @@
-package messaging
+package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"UserBookApi/internal/application"
+	"UserBookApi/internal/infrastructure/postgres"
+	"UserBookApi/internal/infrastructure/security"
+	"UserBookApi/internal/interfaces/httpapi"
+	"UserBookApi/internal/interfaces/messaging"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const (
-	QueueRegister = "user.register"
-	QueueLogin    = "user.login"
-)
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-type Handler interface {
-	Handle(ctx context.Context, body []byte) Response
-}
+	dsn := mustEnv("DATABASE_URL")
+	amqpURL := mustEnv("RABBITMQ_URL")
+	keyPath := mustEnv("JWT_PRIVATE_KEY_PATH")
 
-type Consumer struct {
-	ch     *amqp.Channel
-	routes map[string]Handler
-}
-
-func NewConsumer(ch *amqp.Channel) *Consumer {
-	return &Consumer{ch: ch, routes: make(map[string]Handler)}
-}
-
-func (c *Consumer) Register(queue string, h Handler) {
-	c.routes[queue] = h
-}
-
-func (c *Consumer) Run(ctx context.Context) error {
-	if err := c.ch.Qos(10, 0, false); err != nil {
-		return err
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	errCh := make(chan error, len(c.routes))
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-	for queue, h := range c.routes {
-		if _, err := c.ch.QueueDeclare(queue, true, false, false, false, nil); err != nil {
-			return err
-		}
-		msgs, err := c.ch.Consume(queue, "", false, false, false, false, nil)
-		if err != nil {
-			return err
-		}
+	conn, err := amqp.Dial(amqpURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
 
-		log.Println("consuming:", queue)
-		go func(msgs <-chan amqp.Delivery, h Handler) {
-			errCh <- c.serve(ctx, msgs, h)
-		}(msgs, h)
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ch.Close()
+
+	issuer, err := security.NewJWTIssuer(keyPEM, time.Hour)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-errCh:
-		return err
-	}
-}
+	// infrastructure
+	repo := postgres.NewUserRepository(db)
+	hasher := security.BcryptHasher{}
 
-func (c *Consumer) serve(ctx context.Context, msgs <-chan amqp.Delivery, h Handler) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case d, ok := <-msgs:
-			if !ok {
-				return errors.New("delivery channel closed")
+	// application
+	register := application.NewRegisterUserUseCase(repo, hasher)
+	login := application.NewLoginUseCase(repo, hasher, issuer)
+
+	// interfaces: HTTP (opcional, só sobe se HTTP_ADDR estiver definido)
+	if addr := os.Getenv("HTTP_ADDR"); addr != "" {
+		srv := &http.Server{Addr: addr, Handler: httpapi.NewRouter(register, login)}
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("http: %v", err)
 			}
-			resp := h.Handle(ctx, d.Body)
-			c.reply(ctx, d, resp)
-			_ = d.Ack(false)
-		}
+		}()
+		defer srv.Shutdown(context.Background())
 	}
+
+	// interfaces: Rabbit
+	consumer := messaging.NewConsumer(ch)
+	consumer.Register(messaging.QueueRegister, messaging.NewRegisterHandler(register))
+	consumer.Register(messaging.QueueLogin, messaging.NewLoginHandler(login))
+
+	if err := consumer.Run(ctx); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("shutting down")
 }
 
-func (c *Consumer) reply(ctx context.Context, d amqp.Delivery, resp Response) {
-	if d.ReplyTo == "" {
-		return
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("%s é obrigatória", key)
 	}
-
-	body, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("marshal reply: %v", err)
-		return
-	}
-
-	err = c.ch.PublishWithContext(ctx, "", d.ReplyTo, false, false, amqp.Publishing{
-		ContentType:   "application/json",
-		CorrelationId: d.CorrelationId,
-		Body:          body,
-	})
-	if err != nil {
-		log.Printf("publish reply: %v", err)
-	}
+	return v
 }
