@@ -25,7 +25,7 @@ func seedUser(t *testing.T, repo *fakeRepo, email, plainPassword string) domain.
 func TestLogin_Success(t *testing.T) {
 	repo := newFakeRepo()
 	user := seedUser(t, repo, "j@x.com", "123456")
-	uc := application.NewLoginUseCase(repo, &fakeHasher{}, &fakeIssuer{})
+	uc := application.Login(repo, &fakeHasher{}, &fakeIssuer{})
 
 	out, err := uc.Execute(context.Background(), application.LoginInput{
 		Email: "j@x.com", Password: "123456",
@@ -43,7 +43,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_EmailIsCaseInsensitive(t *testing.T) {
 	repo := newFakeRepo()
 	seedUser(t, repo, "j@x.com", "123456")
-	uc := application.NewLoginUseCase(repo, &fakeHasher{}, &fakeIssuer{})
+	uc := application.Login(repo, &fakeHasher{}, &fakeIssuer{})
 
 	_, err := uc.Execute(context.Background(), application.LoginInput{
 		Email: "  J@X.COM ", Password: "123456",
@@ -67,7 +67,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
 			seedUser(t, repo, "j@x.com", "123456")
-			uc := application.NewLoginUseCase(repo, &fakeHasher{}, &fakeIssuer{})
+			uc := application.Login(repo, &fakeHasher{}, &fakeIssuer{})
 
 			out, err := uc.Execute(context.Background(), tt.in)
 
@@ -86,7 +86,7 @@ func TestLogin_DependencyErrors(t *testing.T) {
 	t.Run("erro no repositório não vira credencial inválida", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.findErr = errBoom
-		uc := application.NewLoginUseCase(repo, &fakeHasher{}, &fakeIssuer{})
+		uc := application.Login(repo, &fakeHasher{}, &fakeIssuer{})
 
 		_, err := uc.Execute(context.Background(), application.LoginInput{
 			Email: "j@x.com", Password: "123456",
@@ -103,7 +103,7 @@ func TestLogin_DependencyErrors(t *testing.T) {
 	t.Run("erro ao emitir token", func(t *testing.T) {
 		repo := newFakeRepo()
 		seedUser(t, repo, "j@x.com", "123456")
-		uc := application.NewLoginUseCase(repo, &fakeHasher{}, &fakeIssuer{err: errBoom})
+		uc := application.Login(repo, &fakeHasher{}, &fakeIssuer{err: errBoom})
 
 		_, err := uc.Execute(context.Background(), application.LoginInput{
 			Email: "j@x.com", Password: "123456",

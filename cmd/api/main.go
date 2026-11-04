@@ -61,8 +61,8 @@ func main() {
 	hasher := security.BcryptHasher{}
 
 	// application
-	register := application.NewRegisterUserUseCase(repo, hasher)
-	login := application.NewLoginUseCase(repo, hasher, issuer)
+	register := application.Register(repo, hasher)
+	login := application.Login(repo, hasher, issuer)
 
 	// interfaces: HTTP (opcional, só sobe se HTTP_ADDR estiver definido)
 	if addr := os.Getenv("HTTP_ADDR"); addr != "" {

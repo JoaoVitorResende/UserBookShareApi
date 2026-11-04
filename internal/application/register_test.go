@@ -16,7 +16,7 @@ var errBoom = errors.New("boom")
 
 func TestRegister_Success(t *testing.T) {
 	repo := newFakeRepo()
-	uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+	uc := application.Register(repo, &fakeHasher{})
 
 	out, err := uc.Execute(context.Background(), application.RegisterUserInput{
 		Name: "Joao", Email: "j@x.com", Password: "123456",
@@ -58,7 +58,7 @@ func TestRegister_InvalidInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+			uc := application.Register(repo, &fakeHasher{})
 
 			_, err := uc.Execute(context.Background(), tt.in)
 
@@ -74,7 +74,7 @@ func TestRegister_InvalidInput(t *testing.T) {
 
 func TestRegister_EmailAlreadyExists(t *testing.T) {
 	repo := newFakeRepo()
-	uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+	uc := application.Register(repo, &fakeHasher{})
 	in := application.RegisterUserInput{Name: "Joao", Email: "j@x.com", Password: "123456"}
 
 	if _, err := uc.Execute(context.Background(), in); err != nil {
@@ -93,7 +93,7 @@ func TestRegister_EmailAlreadyExists(t *testing.T) {
 
 func TestRegister_NormalizesEmail(t *testing.T) {
 	repo := newFakeRepo()
-	uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+	uc := application.Register(repo, &fakeHasher{})
 
 	_, err := uc.Execute(context.Background(), application.RegisterUserInput{
 		Name: "Joao", Email: "  J@X.com ", Password: "123456",
@@ -112,7 +112,7 @@ func TestRegister_DependencyErrors(t *testing.T) {
 
 	t.Run("erro no hasher", func(t *testing.T) {
 		repo := newFakeRepo()
-		uc := application.NewRegisterUserUseCase(repo, &fakeHasher{hashErr: errBoom})
+		uc := application.Register(repo, &fakeHasher{hashErr: errBoom})
 
 		_, err := uc.Execute(context.Background(), in)
 
@@ -127,7 +127,7 @@ func TestRegister_DependencyErrors(t *testing.T) {
 	t.Run("erro ao verificar email", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.existsErr = errBoom
-		uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+		uc := application.Register(repo, &fakeHasher{})
 
 		_, err := uc.Execute(context.Background(), in)
 
@@ -142,7 +142,7 @@ func TestRegister_DependencyErrors(t *testing.T) {
 	t.Run("erro ao salvar", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.saveErr = errBoom
-		uc := application.NewRegisterUserUseCase(repo, &fakeHasher{})
+		uc := application.Register(repo, &fakeHasher{})
 
 		_, err := uc.Execute(context.Background(), in)
 

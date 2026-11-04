@@ -29,7 +29,7 @@ type LoginUseCase struct {
 	tokens TokenIssuer
 }
 
-func NewLoginUseCase(users UserRepository, hasher PasswordHasher, tokens TokenIssuer) *LoginUseCase {
+func Login(users UserRepository, hasher PasswordHasher, tokens TokenIssuer) *LoginUseCase {
 	return &LoginUseCase{users: users, hasher: hasher, tokens: tokens}
 }
 

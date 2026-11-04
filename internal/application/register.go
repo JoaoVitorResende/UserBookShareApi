@@ -35,7 +35,7 @@ type RegisterUserUseCase struct {
 	hasher PasswordHasher
 }
 
-func NewRegisterUserUseCase(users UserRepository, hasher PasswordHasher) *RegisterUserUseCase {
+func Register(users UserRepository, hasher PasswordHasher) *RegisterUserUseCase {
 	return &RegisterUserUseCase{users: users, hasher: hasher}
 }
 
