@@ -25,6 +25,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - default
+      - bookshare-net
 
   user-api:
     build: .
@@ -39,6 +42,9 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    networks:
+      - default
+      - bookshare-net
 
 secrets:
   jwt_private_key:
@@ -46,3 +52,7 @@ secrets:
 
 volumes:
   users-data:
+
+networks:
+  bookshare-net:
+    external: true
